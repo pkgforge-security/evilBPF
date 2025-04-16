@@ -1,9 +1,14 @@
-ARCH 		?= $(shell uname -m|sed 's/x86_64/x86/'|sed 's/aarch64/arm/')
-LIBBPF_PATH  = $(ROOTDIR)/../lib/libbpf/src
-LIBBPF_FLAGS = -I$(LIBBPF_PATH) -L$(LIBBPF_PATH) -l:libbpf.a -lbpf
-COMMON_INCLUDES = -I.
-RELEASE_DIR  = $(ROOTDIR)/../dst
+ARCH ?= $(shell uname -m | sed 's/x86_64/x86/' | sed 's/aarch64/arm/')
 
+# Use pkg-config instead of hardcoded path
+LIBBPF_CFLAGS ?= $(shell pkg-config --cflags libbpf)
+LIBBPF_LDFLAGS ?= $(shell pkg-config --static --libs libbpf)
+LIBELF_LDFLAGS ?= $(shell pkg-config --static --libs libelf)
+
+COMMON_INCLUDES = -I.
+RELEASE_DIR = $(ROOTDIR)/../dst
+
+# Default target
 all: $(APPS)
 
 release_dest: $(APPS)
@@ -11,16 +16,16 @@ release_dest: $(APPS)
 	cp $(APPS) $(RELEASE_DIR)
 
 release: release_dest
-	make clean
+	$(MAKE) clean
 
 %.o: %.c
 	$(call msg,CC,$@)
-	clang -Wall -O2 $(CFLAGS) -c $< -o $@ $(INCLUDES) $(COMMON_INCLUDES)
+	clang -O2 $(CFLAGS) $(LIBBPF_CFLAGS) -c $< -o $@ $(INCLUDES) $(COMMON_INCLUDES)
 
 # Build application binary
-$(APPS): %: | $(APPS).skel.h libbpf $(OBJ)
+$(APPS): %: | $(APPS).skel.h $(OBJ)
 	$(call msg,BINARY,$@)
-	clang -Wall -O2 $@.c $(CFLAGS) $(OBJ) $(LIBBPF_FLAGS) -lelf -lz -o $@ -static
+	clang -O2 $@.c $(CFLAGS) $(OBJ) $(LIBBPF_CFLAGS) $(LIBBPF_LDFLAGS) $(LIBELF_LDFLAGS) -o $@ -static
 	strip $@
 
 # eBPF skeleton
@@ -32,18 +37,17 @@ $(APPS).bpf.o: $(EBPF).bpf.o
 	$(call msg,BPF,$@)
 	bpftool gen object $@ $<
 
-# build each eBPF object file
+# Build each eBPF object file
 $(EBPF).bpf.o: $(EBPF).bpf.c vmlinux.h
 	$(call msg,BPF,$@)
-	clang -O2 -g -Wall -target bpf -D__KERNEL__ -D__TARGET_ARCH_$(ARCH) $(CFLAGS) $(INCLUDES) $(COMMON_INCLUDES) $(CLANG_BPF_SYS_INCLUDES) -c $(filter %.c,$^) -o $@
+	clang -O2 -target bpf -D__KERNEL__ -D__TARGET_ARCH_$(ARCH) \
+		$(CFLAGS) $(LIBBPF_CFLAGS) $(INCLUDES) $(COMMON_INCLUDES) $(CLANG_BPF_SYS_INCLUDES) \
+		-c $(filter %.c,$^) -o $@
 	llvm-strip -g --strip-unneeded $@
 
 vmlinux.h:
 	$(call msg,VMH, $@)
 	bpftool btf dump file /sys/kernel/btf/vmlinux format c > $@
-
-libbpf:
-	make -C $(LIBBPF_PATH)
 
 clean:
 	rm -f $(APPS) $(EBPF).bpf.o $(EBPF).skel.h vmlinux.h $(EXTRA_APPS) $(OBJ) $(APPS).bpf.o $(APPS).skel.h
