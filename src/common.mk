@@ -42,7 +42,7 @@ $(EBPF).bpf.o: $(EBPF).bpf.c vmlinux.h
 	$(call msg,BPF,$@)
 	clang -O2 -target bpf -D__KERNEL__ -D__TARGET_ARCH_$(ARCH) \
 		$(CFLAGS) $(LIBBPF_CFLAGS) $(INCLUDES) $(COMMON_INCLUDES) $(CLANG_BPF_SYS_INCLUDES) \
-		-c $(filter %.c,$^) -o $@
+		-Xclang -emit-obj -c $(filter %.c,$^) -o $@
 	llvm-strip -g --strip-unneeded $@
 
 vmlinux.h:
